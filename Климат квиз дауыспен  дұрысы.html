@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Climate Quest: Қазақстан және Әлем</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --neon-blue: #00d2ff;
+            --neon-green: #39ff14;
+        }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f4f7f6; overflow: hidden; }
+        .container { display: flex; height: 100vh; }
+        #side-panel {
+            width: 350px; background: white; padding: 20px;
+            box-shadow: 4px 0 15px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; z-index: 1000;
+        }
+        #map { flex-grow: 1; z-index: 1; background: #aad3df; }
+        .factor-card {
+            background: #fff; border-radius: 12px; padding: 15px;
+            margin-bottom: 15px; border: 2px solid #eee;
+        }
+        .factor-item { margin: 8px 0; font-size: 1rem; color: #444; }
+        .neon-btn {
+            background: #222; color: var(--neon-blue);
+            border: 2px solid var(--neon-blue);
+            padding: 12px; border-radius: 8px; cursor: pointer;
+            font-size: 1rem; font-weight: bold;
+            text-transform: uppercase; transition: 0.3s;
+            margin-top: 10px;
+        }
+        .neon-btn:hover { background: var(--neon-blue); color: #000; }
+        .custom-tooltip {
+            background: rgba(0, 0, 0, 0.8); border: 1px solid var(--neon-blue);
+            color: white; font-weight: bold; padding: 5px; border-radius: 5px;
+        }
+        .modal {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; padding: 25px; border-radius: 15px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.2); z-index: 2000;
+            display: none; text-align: center; width: 300px;
+        }
+    </style>
+</head>
+<body>
+
+<audio id="sound-correct" src="https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3"></audio>
+<audio id="sound-wrong" src="https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3"></audio>
+
+<div class="container">
+    <div id="side-panel">
+        <h2 style="text-align:center;">🌍 Climate Quest</h2>
+        <p id="round-info" style="text-align:center; font-weight:bold;">Деңгей: 1 / 10</p>
+        
+        <div class="factor-card">
+            <div class="factor-item">🌡 Температура: <b id="f-temp">?</b></div>
+            <div class="factor-item">🌧 Жауын-шашын: <b id="f-rain">?</b></div>
+            <div class="factor-item">⛰ Рельеф: <b id="f-relief">?</b></div>
+        </div>
+
+        <div id="timer" style="font-size: 20px; text-align:center; margin-bottom: 10px; font-weight:bold; color:#e74c3c">00:00</div>
+
+        <div style="display:flex; justify-content: space-around; margin-bottom: 10px;">
+            <div style="color:green">Дұрыс: <span id="s-correct">0</span></div>
+            <div style="color:red">Қате: <span id="s-wrong">0</span></div>
+        </div>
+
+        <button class="neon-btn" onclick="startGame()" id="start-btn">Ойынды бастау</button>
+    </div>
+
+    <div id="map"></div>
+</div>
+
+<div id="result-modal" class="modal">
+    <h3 id="modal-title"></h3>
+    <p id="modal-text"></p>
+    <button class="neon-btn" onclick="closeModal()" style="width:100%">Жалғастыру</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const climateZones = [
+        { name: "Солтүстік Мұзды мұхит (Арктика)", temp: "-30°C", rain: "150 мм", relief: "Мұзды үстірт", coords: [[70, -180], [85, -180], [85, 180], [70, 180]], color: "#a5b1c2" },
+        { name: "Амазонка ойпаты (Экватор)", temp: "+28°C", rain: "3000 мм", relief: "Ылғалды жазық", coords: [[-5, -75], [5, -75], [5, -50], [-5, -50]], color: "#26de81" },
+        { name: "Сахара шөлі (Африка)", temp: "+45°C", rain: "50 мм", relief: "Құмды шағылдар", coords: [[15, -10], [30, -10], [30, 35], [15, 35]], color: "#fd9644" },
+        { name: "Қазақстан даласы (Қоңыржай)", temp: "+25°C / -20°C", rain: "350 мм", relief: "Жазық дала", coords: [[45, 50], [55, 50], [55, 85], [40, 85]], color: "#f7b731" },
+        { name: "Антарктида мұздығы", temp: "-60°C", rain: "100 мм", relief: "Биік мұз жамылғысы", coords: [[-88, -180], [-65, -180], [-65, 180], [-88, 180]], color: "#45aaf2" },
+        { name: "Аустралияның үлкен шөлі", temp: "+38°C", rain: "200 мм", relief: "Үстіртті аймақ", coords: [[-30, 120], [-15, 120], [-15, 150], [-30, 150]], color: "#eb3b5a" },
+        { name: "Батыс Еуропа жағалауы", temp: "+18°C", rain: "1000 мм", relief: "Төбелі жазық", coords: [[45, -5], [60, -5], [60, 15], [45, 15]], color: "#4b7bec" },
+        { name: "Оңтүстік-Шығыс Азия (Муссон)", temp: "+26°C", rain: "2500 мм", relief: "Таулы-орманды", coords: [[10, 95], [22, 95], [22, 115], [10, 115]], color: "#20bf6b" },
+        { name: "Жерорта теңізі жағалауы", temp: "+24°C / +12°C", rain: "700 мм", relief: "Таулы жағалау", coords: [[32, 5], [42, 5], [42, 30], [32, 30]], color: "#fc5c65" },
+        { name: "Тибет таулы үстірті", temp: "+8°C", rain: "300 мм", relief: "Биік тау", coords: [[28, 78], [37, 78], [37, 95], [28, 95]], color: "#778ca3" }
+    ];
+
+    let map, timerInterval, currentRound = 0, seconds = 0;
+    let stats = { correct: 0, wrong: 0 };
+    let usedIdx = [];
+
+    function initMap() {
+        // Картаны жасау:zoom мен орталықты Антарктида көрінетіндей реттеу
+        map = L.map('map', {
+            minZoom: 1,
+            maxZoom: 5,
+            worldCopyJump: true
+        }).setView([0, 0], 2);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+
+        climateZones.forEach(zone => {
+            let poly = L.polygon(zone.coords, {
+                color: zone.color, weight: 2, fillColor: zone.color, fillOpacity: 0.1
+            }).addTo(map);
+
+            poly.bindTooltip(zone.name, { sticky: true, className: 'custom-tooltip' });
+            poly.on('click', () => checkAnswer(zone, poly));
+        });
+    }
+
+    function playSound(id) {
+        const sound = document.getElementById(id);
+        sound.currentTime = 0;
+        sound.play().catch(() => {}); // Браузер шектеуі болса қате шығармайды
+    }
+
+    function startGame() {
+        document.getElementById('start-btn').style.display = 'none';
+        nextRound();
+        startTimer();
+    }
+
+    function startTimer() {
+        timerInterval = setInterval(() => {
+            seconds++;
+            let m = Math.floor(seconds/60).toString().padStart(2,'0');
+            let s = (seconds%60).toString().padStart(2,'0');
+            document.getElementById('timer').innerText = `${m}:${s}`;
+        }, 1000);
+    }
+
+    function nextRound() {
+        if (currentRound >= 10) {
+            alert(`Ойын бітті! Ұпай: ${stats.correct}/10. Уақыт: ${document.getElementById('timer').innerText}`);
+            location.reload();
+            return;
+        }
+        let rand;
+        do { rand = Math.floor(Math.random() * climateZones.length); } while (usedIdx.includes(rand));
+        usedIdx.push(rand);
+
+        let q = climateZones[rand];
+        document.getElementById('f-temp').innerText = q.temp;
+        document.getElementById('f-rain').innerText = q.rain;
+        document.getElementById('f-relief').innerText = q.relief;
+        document.getElementById('round-info').innerText = `Деңгей: ${currentRound + 1} / 10`;
+    }
+
+    function checkAnswer(zone, layer) {
+        if (document.getElementById('result-modal').style.display === 'block' || usedIdx.length === 0) return;
+
+        let target = climateZones[usedIdx[currentRound]];
+        if (zone.name === target.name) {
+            stats.correct++;
+            playSound('sound-correct');
+            showModal("✅ Дұрыс!", `${zone.name}`);
+        } else {
+            stats.wrong++;
+            playSound('sound-wrong');
+            showModal("❌ Қате", `Бұл - ${zone.name}. Сізге ${target.name} керек еді.`);
+        }
+        updateStats();
+    }
+
+    function updateStats() {
+        document.getElementById('s-correct').innerText = stats.correct;
+        document.getElementById('s-wrong').innerText = stats.wrong;
+    }
+
+    function showModal(title, text) {
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-text').innerText = text;
+        document.getElementById('result-modal').style.display = 'block';
+    }
+
+    function closeModal() {
+        document.getElementById('result-modal').style.display = 'none';
+        currentRound++;
+        nextRound();
+    }
+
+    window.onload = initMap;
+</script>
+</body>
+</html>
